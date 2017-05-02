@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/docker/docker/opts"
-	_"os"
-	"os"
 )
 
 func main() {
@@ -25,17 +24,25 @@ func main() {
 	defer cancel()
 	filterOpt := opts.NewFilterOpt()
 	filterOpt.Set("event=stop")
-	stopEvent, _ := cli.Events(ctx,types.EventsOptions{"", "", filterOpt.Value()})
+	stopEvent, eof := cli.Events(ctx,types.EventsOptions{ Filters: filterOpt.Value()} )
 	for {
 		fmt.Println("Observing stop events...")
-		fmt.Println(<-stopEvent)
-		rescalePendingTasks(managerCli)
+		select {
+		case <- eof:
+			break
+		case <- stopEvent:
+			rescalePendingTasks(managerCli)
+		}
 	}
 }
 
 func rescalePendingTasks(cli *client.Client) {
 	fmt.Println("Collecting pending tasks...")
 	pendingTasks := getPendingTasks(cli)
+	if len(pendingTasks) == 0 {
+		fmt.Println("No pending tasks found.")
+		return
+	}
 	incompleteServices := make(map[string][]swarm.Task)
 	for _, task := range pendingTasks {
 		incompleteServices[task.ServiceID] = append(incompleteServices[task.ServiceID], task)
